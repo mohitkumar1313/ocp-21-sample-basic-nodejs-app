@@ -1,6 +1,7 @@
 const Prometheus = require('prom-client')
 const express = require('express');
 const http = require('http');
+const mysql = require('mysql');  // Add MySQL module
 
 Prometheus.collectDefaultMetrics();
 
@@ -9,24 +10,47 @@ const requestHistogram = new Prometheus.Histogram({
     help: 'Duration of HTTP requests in seconds',
     labelNames: ['code', 'handler', 'method'],
     buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5]
-})
+});
 
 const requestTimer = (req, res, next) => {
-  const path = new URL(req.url, `http://${req.hostname}`).pathname
+  const path = new URL(req.url, `http://${req.hostname}`).pathname;
   const stop = requestHistogram.startTimer({
     method: req.method,
     handler: path
-  })
+  });
   res.on('finish', () => {
     stop({
       code: res.statusCode
-    })
-  })
-  next()
-}
+    });
+  });
+  next();
+};
 
 const app = express();
-const server = http.createServer(app)
+const server = http.createServer(app);
+
+// MySQL connection using environment variables
+const connection = mysql.createConnection({
+  host: process.env.MYSQL_SERVICE_HOST || 'mysql',
+  user: process.env.MYSQL_USER || 'root',
+  password: process.env.MYSQL_PASSWORD || 'password',
+  database: process.env.MYSQL_DATABASE || 'mydatabase'
+});
+
+// Connect to MySQL
+connection.connect((err) => {
+  if (err) {
+    console.error('Error connecting to MySQL:', err);
+    return;
+  }
+  console.log('Connected to MySQL database!');
+
+  // Run a simple test query to check connection
+  connection.query('SELECT 1 + 1 AS solution', (err, results) => {
+    if (err) throw err;
+    console.log('Test Query Result:', results[0].solution);  // Expected output: 2
+  });
+});
 
 // See: http://expressjs.com/en/4x/api.html#app.settings.table
 const PRODUCTION = app.get('env') === 'production';
@@ -38,7 +62,7 @@ app.get('/live', (req, res) => res.status(200).json({status:"ok"}));
 app.get('/metrics', (req, res, next) => {
   res.set('Content-Type', Prometheus.register.contentType)
   res.end(Prometheus.register.metrics())
-})
+});
 
 // Time routes after here.
 app.use(requestTimer);
